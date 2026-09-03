@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/localsend">
+        <file alias="logo-512.png">icons/logo-512.png</file>
+        <file alias="logo-256.png">icons/logo-256.png</file>
+        <file alias="logo-128.png">icons/logo-128.png</file>
+        <file alias="logo-32.png">icons/logo-32.png</file>
+        <file alias="logo-32-black.png">icons/logo-32-black.png</file>
+        <file alias="logo-32-white.png">icons/logo-32-white.png</file>
+        <file alias="logo-512-white.png">icons/logo-512-white.png</file>
+        <file alias="client.crt">certs/client.crt</file>
+        <file alias="client.key">certs/client.key</file>
+    </qresource>
+</RCC>

@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LocalSend
+Name[zh_CN]=LocalSend
+GenericName=Local file sharing
+GenericName[zh_CN]=局域网文件互传
+Comment=Qt/DTK native LocalSend client
+Comment[zh_CN]=基于 Qt/DTK 的 LocalSend 原生客户端
+Exec=/opt/localsend-qt/localsend-qt
+Icon=/usr/share/pixmaps/localsend-qt.png
+Terminal=false
+Categories=Network;FileTransfer;Utility;
+Keywords=localsend;file;share;transfer;局域网;互传;
+StartupNotify=true
