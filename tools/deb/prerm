@@ -1,0 +1,25 @@
+#!/bin/sh
+# 卸载前：移除桌面快捷方式与旧版残留
+set -e
+
+APPID=com.cnraft.localsend
+
+for home in /home/*; do
+    if [ -f "${home}/Desktop/${APPID}.desktop" ]; then
+        rm -f "${home}/Desktop/${APPID}.desktop"
+    fi
+    # 旧版手动快捷方式（幂等）
+    if [ -f "${home}/Desktop/localsend-qt.desktop" ]; then
+        rm -f "${home}/Desktop/localsend-qt.desktop"
+    fi
+done
+
+# 旧版手动安装残留（幂等清理）
+if [ -f /usr/share/applications/localsend-qt.desktop ]; then
+    rm -f /usr/share/applications/localsend-qt.desktop
+fi
+if [ -f /usr/share/pixmaps/localsend-qt.png ]; then
+    rm -f /usr/share/pixmaps/localsend-qt.png
+fi
+
+exit 0

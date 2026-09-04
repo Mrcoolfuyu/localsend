@@ -134,8 +134,10 @@ void HttpServer::handleUploadData(Conn* c, QTcpSocket* sock, const QByteArray& d
     if (!data.isEmpty()) {
         c->out->write(data);
         c->bodyReceived += data.size();
-        emit m_core->receiveProgress(c->query.value("sessionId"),
-                                     c->fileName, c->bodyReceived, c->total);
+        // 文本消息不进接收列表：不发进度信号（GUI 端不会出现 UUID.txt 条目）
+        if (!m_core->isMessageUpload(c->query.value("sessionId"), c->fileName))
+            emit m_core->receiveProgress(c->query.value("sessionId"),
+                                         c->fileName, c->bodyReceived, c->total);
     }
     if (c->bodyReceived >= c->total) finishConn(c, sock);
 }
@@ -163,8 +165,10 @@ void HttpServer::processChunked(Conn* c, QTcpSocket* sock)
             QByteArray data = c->raw.left(c->chunkRemain);
             c->out->write(data);
             c->bodyReceived += data.size();
-            emit m_core->receiveProgress(c->query.value("sessionId"),
-                                         c->fileName, c->bodyReceived, 0);
+            // 文本消息不进接收列表：不发进度信号
+            if (!m_core->isMessageUpload(c->query.value("sessionId"), c->fileName))
+                emit m_core->receiveProgress(c->query.value("sessionId"),
+                                             c->fileName, c->bodyReceived, 0);
             c->raw = c->raw.mid(c->chunkRemain);
             if (c->raw.startsWith("\r\n")) c->raw = c->raw.mid(2);
             c->chunkRemain = 0;

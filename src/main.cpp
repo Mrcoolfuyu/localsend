@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
 {
     // 1) 最早安装日志：此后所有 qDebug/qWarning 都会落盘
     //    日志固定位于 ~/.local/share/localsend-qt/localsend.log
-    Logger::install("0.3.4");
+    Logger::install("0.3.5");
 
     Dtk::Widget::DApplication a(argc, argv);
 
@@ -28,7 +28,7 @@ int main(int argc, char* argv[])
     a.setOrganizationName("localsend");
     a.setApplicationName("LocalSend");
     a.setApplicationDisplayName("LocalSend");
-    a.setApplicationVersion("0.3.4");
+    a.setApplicationVersion("0.3.5");
     // DTK「关于」对话框的主页默认显示 www.chinauos.com，必须显式覆盖为项目主页
     a.setApplicationHomePage("https://github.com/Mrcoolfuyu/");
     a.setWindowIcon(QIcon(":/localsend/logo-512.png"));

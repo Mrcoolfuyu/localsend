@@ -102,7 +102,7 @@ public:
     QString localIp() const { return getLocalIp(); }
     QString multicastSummary() const { return m_mcSummary; }
 
-    void refreshDiscovery();                       // 重新广播 + 主动 register
+    void refreshDiscovery();                       // 重新广播 + 主动 register + 探测离线设备
     // 返回任务 ID；可同时对多个目标调用（多选发送）
     quint32 sendFiles(const QString& fingerprint,
                       const QList<OutgoingFile>& files);
@@ -123,6 +123,8 @@ public:
     void finishUpload(const QString& sessionId, const QString& fileId,
                       const QString& savedPath);
     void cancelSession(const QString& sessionId);
+    // 该上传是否为文本消息（preview 非空）——HttpServer 用它抑制消息的进度信号
+    bool isMessageUpload(const QString& sessionId, const QString& fileName) const;
     // 文本消息投递（消息传输不建会话不落盘，确认后由 HttpServer 调用）
     void deliverMessage(const QString& peerAlias, const QString& fileName,
                         const QString& content);
@@ -136,7 +138,8 @@ signals:
     void receiveFinished(const QString& sessionId, const QString& fileName,
                          const QString& savedPath);
     // 文本消息接收完成（官方协议 preview 字段非空时触发）
-    void messageReceived(const QString& sessionId, const QString& fileName,
+    // senderAlias = 发送方设备名（接收列表显示「来自 XX」用）
+    void messageReceived(const QString& sessionId, const QString& senderAlias,
                          const QString& content);
     // 带任务 ID 的发送信号：一次多选发送会产生多个任务
     void sendProgress(quint32 taskId, const QString& deviceAlias,
@@ -166,6 +169,9 @@ private:
 
     void sendAnnouncement();
     void sendRegisterTo(const Device& dev);
+    void probeDevices();                                   // 主动探测所有已知设备，移除无响应者
+    void probeDevice(const Device& d, bool altProto);      // 探测单台设备（altProto=换协议重试）
+    QString loadOrCreateFingerprint();                     // 指纹持久化，避免每次启动变成"新设备"
     QString getLocalIp() const;
     QString newSessionId() const;
     QString sanitizeFileName(const QString& name) const;

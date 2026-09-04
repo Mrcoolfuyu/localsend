@@ -1,0 +1,11 @@
+[Desktop Entry]
+Categories=Network;Utility;
+Name=LocalSend
+Comment=Share files and messages with nearby devices on your local network
+Comment[zh_CN]=与附近设备互传文件和文本消息（局域网）
+Exec=/opt/apps/com.cnraft.localsend/files/bin/localsend-qt
+Icon=com.cnraft.localsend
+Type=Application
+Terminal=false
+StartupNotify=true
+StartupWMClass=localsend-qt

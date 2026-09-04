@@ -1,0 +1,29 @@
+#!/bin/sh
+# 安装后：清理旧版手动安装残留 + 为已有桌面的用户放置快捷方式
+set -e
+
+APPID=com.cnraft.localsend
+DESKTOP_SRC="/opt/apps/${APPID}/entries/applications/${APPID}.desktop"
+
+# ---- 清理旧版（手动 cp 安装）残留，避免启动器出现双图标 ----
+if [ -f /usr/share/applications/localsend-qt.desktop ]; then
+    rm -f /usr/share/applications/localsend-qt.desktop
+fi
+if [ -f /usr/share/pixmaps/localsend-qt.png ]; then
+    rm -f /usr/share/pixmaps/localsend-qt.png
+fi
+
+# ---- 桌面快捷方式：仅处理 /home 下已存在 Desktop 目录的用户 ----
+for home in /home/*; do
+    [ -d "${home}/Desktop" ] || continue
+    user=$(basename "${home}")
+    # 移除旧版手动放置的快捷方式，避免双图标
+    if [ -f "${home}/Desktop/localsend-qt.desktop" ]; then
+        rm -f "${home}/Desktop/localsend-qt.desktop"
+    fi
+    cp "${DESKTOP_SRC}" "${home}/Desktop/${APPID}.desktop"
+    chown "${user}" "${home}/Desktop/${APPID}.desktop" 2>/dev/null || true
+    chmod 644 "${home}/Desktop/${APPID}.desktop"
+done
+
+exit 0

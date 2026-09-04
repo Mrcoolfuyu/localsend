@@ -92,6 +92,14 @@ private:
     QIcon deviceIcon(const QString& deviceType) const;
     void refreshSendStatus();
 
+    // 文本消息确认框（BUG2）：返回 1=同意 0=拒绝 2=一律拒绝
+    int askReceiveTextMessage(const QString& peerAlias);
+    // 文本消息查看弹窗（BUG4）：文字可选中 + 复制全部按钮
+    void showMessageDialog(const QString& senderAlias, const QString& content);
+    // 「一律拒绝」屏蔽键：指纹优先，缺失时退化为别名
+    QString blockKey(const QString& fp, const QString& alias) const
+    { return fp.isEmpty() ? QString("alias:") + alias : fp; }
+
     LocalSend* m_core;
     HttpServer* m_server;
     quint16 m_port = 53317;
@@ -141,6 +149,7 @@ private:
     QList<OutgoingFile> m_selectedFiles;
     QMap<QString, QListWidgetItem*> m_recvItems;   // "sid|name" -> item
     QMap<quint32, SendTask> m_sendTasks;           // taskId -> 任务状态（多目标并发）
+    QSet<QString> m_blockedTextSenders;            // 「一律拒绝」的文本消息发送方（重启前生效）
 };
 
 #endif // MAINWINDOW_H

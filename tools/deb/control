@@ -1,0 +1,11 @@
+Package: com.cnraft.localsend
+Version: 0.3.5
+Section: utils
+Priority: optional
+Architecture: arm64
+Depends: libqt5core5a, libqt5gui5, libqt5network5, libqt5widgets5, libqt5dbus5, libqt5printsupport5, libqt5xml5, libdtkcore5, libdtkgui5, libdtkwidget5
+Maintainer: Mr.cool <ns.mrcool@gmail.com>
+Homepage: https://github.com/Mrcoolfuyu/localsend
+Description: LocalSend for UOS (Qt/DTK native)
+ Qt/DTK 原生实现的局域网文件互传工具，与官方 LocalSend 协议 (v2) 完全兼容，
+ 支持跨平台文件与文本消息收发、多设备并发发送、mTLS 加密传输。

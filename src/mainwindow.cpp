@@ -7,6 +7,7 @@
 #include <DProgressBar>
 #include <DFileDialog>
 #include <DMessageBox>
+#include <DTitlebar>
 using namespace Dtk::Widget;
 
 #include <QTabWidget>
@@ -89,6 +90,8 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowTitle("LocalSend");
     setWindowIcon(QIcon(":/localsend/logo-512.png"));
     QApplication::setWindowIcon(QIcon(":/localsend/logo-512.png"));
+    // 去掉 DTK 标题栏「图标 | 标题」之间的灰色竖线
+    titlebar()->setSeparatorVisible(false);
     resize(940, 640);
     setMinimumSize(760, 520);
 
@@ -224,7 +227,7 @@ void MainWindow::setupUi()
     navLayout->addWidget(m_navList);
     navLayout->addStretch();
 
-    QLabel* brandFoot = new QLabel("v0.3.4 · Mr.cool");
+    QLabel* brandFoot = new QLabel("v0.3.5 · Mr.cool");
     brandFoot->setStyleSheet("color: #9aa2a9; font-size: 11px; padding-left: 16px;");
     navLayout->addWidget(brandFoot);
 
@@ -312,7 +315,7 @@ QWidget* MainWindow::createSendPage()
     m_deviceList->setSelectionMode(QAbstractItemView::ExtendedSelection);   // 多选：支持一次发给多台
     m_deviceList->setAlternatingRowColors(true);
     m_deviceList->setIconSize(QSize(28, 28));
-    m_deviceList->setMinimumHeight(150);
+    m_deviceList->setMinimumHeight(100);
     m_deviceList->setStyleSheet(
         "QListWidget { border: 1px solid #ddd; border-radius: 6px; padding: 4px; background: white; }"
         "QListWidget::item { padding: 8px 10px; border-radius: 4px; margin: 1px 0; }"
@@ -340,7 +343,7 @@ QWidget* MainWindow::createSendPage()
     m_fileList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_fileList->setAlternatingRowColors(true);
     m_fileList->setIconSize(QSize(24, 24));
-    m_fileList->setMinimumHeight(110);
+    m_fileList->setMinimumHeight(80);
     m_fileList->setStyleSheet(
         "QListWidget { border: 1px solid #ddd; border-radius: 6px; padding: 4px; background: white; }"
         "QListWidget::item { padding: 6px 10px; border-radius: 4px; margin: 1px 0; }"
@@ -352,6 +355,7 @@ QWidget* MainWindow::createSendPage()
     m_btnSend = new QPushButton("发送到选定设备");
     m_btnSend->setEnabled(false);
     m_btnSend->setFixedHeight(40);
+    m_btnSend->setMinimumWidth(180);
     m_btnSend->setStyleSheet(
         "QPushButton { font-size: 14px; font-weight: bold; border-radius: 6px; "
         "background: #4a9eff; color: white; border: none; padding: 0 26px; }"
@@ -395,6 +399,8 @@ QWidget* MainWindow::createSendPage()
     connect(m_btnRemoveFile, &QPushButton::clicked, this, &MainWindow::removeSelectedFiles);
     connect(m_btnClearFiles, &QPushButton::clicked, this, &MainWindow::clearFileList);
     connect(m_deviceList, &QListWidget::itemSelectionChanged, this, &MainWindow::onDeviceSelectionChanged);
+    // 文件列表选中项变化时刷新发送状态（BUG1：只发送列表中选中的文件）
+    connect(m_fileList, &QListWidget::itemSelectionChanged, this, &MainWindow::updateSendButton);
 
     return page;
 }
@@ -518,7 +524,7 @@ QWidget* MainWindow::createSettingsPage()
     infoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     infoLabel->setStyleSheet("background: #f5f5f5; padding: 12px; border-radius: 6px; font-size: 12px;");
     infoLabel->setText(
-        QString("版本：LocalSend 0.3.4\n"
+        QString("版本：LocalSend 0.3.5\n"
                 "作者：Mr.cool（https://github.com/Mrcoolfuyu/）\n"
                 "协议端口：%1\n"
                 "本机 IP：%2\n"
@@ -612,8 +618,8 @@ void MainWindow::dropEvent(QDropEvent* event)
 void MainWindow::refreshDevices()
 {
     m_core->refreshDiscovery();
-    m_deviceHint->setText("已广播发现请求，等待响应…");
-    QTimer::singleShot(1200, this, [this]() {
+    m_deviceHint->setText("已广播发现请求，正在探测离线设备…");
+    QTimer::singleShot(4500, this, [this]() {   // 探测 2s×2 次协议重试，等它结束再回填
         onDevicesChanged();
         m_deviceHint->setText("可多选（Ctrl / Shift + 点击），一次发送给多台设备");
     });
@@ -842,15 +848,22 @@ void MainWindow::updateSendButton()
                        ? QString("发送到 %1 台设备").arg(devCount)
                        : "发送到选定设备");
 
+    // BUG1：文件列表中选中了几项就只发送几项；未选中任何项 = 发送全部
+    QList<QListWidgetItem*> fileSel = m_fileList->selectedItems();
+    int sendCount = fileSel.isEmpty() ? m_selectedFiles.size() : fileSel.size();
+
     if (!hasFiles && devCount == 0)
         m_sendStatus->setText("就绪 — 选择文件和目标设备后点击发送");
     else if (!hasFiles)
         m_sendStatus->setText("请先添加要发送的文件（可拖拽或点击「文件」按钮）");
     else if (devCount == 0)
         m_sendStatus->setText("请在设备列表中选择至少一个目标（可多选）");
-    else
+    else if (fileSel.isEmpty())
         m_sendStatus->setText(QString("准备就绪：%1 个文件 → %2 台设备")
                                   .arg(m_selectedFiles.size()).arg(devCount));
+    else
+        m_sendStatus->setText(QString("准备就绪：发送选定的 %1 / 共 %2 个文件 → %3 台设备")
+                                  .arg(sendCount).arg(m_selectedFiles.size()).arg(devCount));
 
     m_btnRemoveFile->setEnabled(hasFiles);
     m_btnClearFiles->setEnabled(hasFiles);
@@ -862,6 +875,25 @@ void MainWindow::sendSelected()
     if (targets.isEmpty()) { DMessageBox::information(this, "提示", "请先选择一个目标设备"); return; }
     if (m_selectedFiles.isEmpty()) { DMessageBox::information(this, "提示", "请先选择文件"); return; }
 
+    // BUG1：只发送「待发送文件列表」中被选中的项；未选中任何项则发送全部
+    QList<OutgoingFile> toSend;
+    QList<QListWidgetItem*> fileSel = m_fileList->selectedItems();
+    if (fileSel.isEmpty()) {
+        toSend = m_selectedFiles;
+    } else {
+        QList<int> rows;
+        for (QListWidgetItem* it : fileSel) rows.append(m_fileList->row(it));
+        std::sort(rows.begin(), rows.end());
+        for (int row : rows)
+            if (row >= 0 && row < m_selectedFiles.size())
+                toSend.append(m_selectedFiles.at(row));
+        // 重编 id 为连续值（协议里 fileId 作为 files 对象的 key 必须唯一）
+        for (int i = 0; i < toSend.size(); ++i)
+            toSend[i].id = QString::number(i);
+    }
+
+    if (toSend.isEmpty()) { DMessageBox::information(this, "提示", "没有可发送的文件"); return; }
+
     m_sendTasks.clear();
     m_sendProgress->setValue(0);
     m_btnSend->setEnabled(false);
@@ -869,17 +901,18 @@ void MainWindow::sendSelected()
     for (QListWidgetItem* it : targets) {
         QString fp = it->data(Qt::UserRole).toString();
         QString alias = it->text().section('\n', 0, 0).trimmed();
-        quint32 taskId = m_core->sendFiles(fp, m_selectedFiles);
+        quint32 taskId = m_core->sendFiles(fp, toSend);
 
         SendTask t;
         t.id = taskId;
         t.deviceAlias = alias;
-        t.fileCount = m_selectedFiles.size();
+        t.fileCount = toSend.size();
         m_sendTasks[taskId] = t;
     }
 
-    Logger::log(QString("[GUI] 发起多选发送：%1 个目标，各 %2 个文件")
-                    .arg(m_sendTasks.size()).arg(m_selectedFiles.size()));
+    Logger::log(QString("[GUI] 发起多选发送：%1 个目标，各 %2 个文件%3")
+                    .arg(m_sendTasks.size()).arg(toSend.size())
+                    .arg(fileSel.isEmpty() ? QString() : "（仅列表选中项）"));
     refreshSendStatus();
 }
 
@@ -988,7 +1021,7 @@ void MainWindow::onReceiveProgress(const QString& sid, const QString& name, qint
         m_recvList->addItem(item);
     }
     int pct = (t > 0) ? int(100 * r / t) : 0;
-    item->setText(QString("[%1%%] %2  (%3/%4)").arg(pct).arg(name).arg(formatSize(r)).arg(formatSize(t)));
+    item->setText(QString("[%1%] %2  (%3/%4)").arg(pct).arg(name).arg(formatSize(r)).arg(formatSize(t)));
     m_recvList->scrollToBottom();
 }
 
@@ -1016,38 +1049,83 @@ void MainWindow::onReceiveFinished(const QString& sid, const QString& name, cons
 }
 
 // 收到文本消息：在接收列表中显示为消息条目，双击弹窗查看全文
-void MainWindow::onMessageReceived(const QString& sid, const QString& name,
+void MainWindow::onMessageReceived(const QString& sid, const QString& senderAlias,
                                    const QString& content)
 {
-    QString key = sid + "|" + name;
-    QListWidgetItem* item = m_recvItems.value(key);
-    if (!item) {
-        item = new QListWidgetItem;
-        m_recvItems[key] = item;
-        m_recvList->addItem(item);
-    }
+    // BUG3：key 加入时间戳防碰撞（sid/别名都可能重复，同内容消息也要各占一行）
+    QString key = sid + "|" + senderAlias + "|" + QString::number(QDateTime::currentMSecsSinceEpoch());
+    QListWidgetItem* item = new QListWidgetItem;
+    m_recvItems[key] = item;
+    m_recvList->addItem(item);
 
     QString brief = content.simplified();
     if (brief.size() > 60) brief = brief.left(60) + "…";
     item->setIcon(QIcon::fromTheme("mail-receive", QIcon::fromTheme("mail-send", QIcon(":/localsend/logo-32.png"))));
-    item->setText(QString("[文本消息] %1  (来自 %2)").arg(brief));
+    // BUG3：%2 用发送方名字（此前只有一个 arg，%2 原样残留）
+    item->setText(QString("[文本消息] %1  (来自 %2)").arg(brief, senderAlias));
     item->setData(Qt::UserRole, QString());          // 不按文件打开
     item->setData(Qt::UserRole + 1, content);        // 全文存 UserRole+1
+    item->setData(Qt::UserRole + 2, senderAlias);    // 发送方名字存 UserRole+2（弹窗标题用）
     item->setToolTip(QString("文本消息全文：\n%1\n\n双击查看").arg(content));
 
     m_recvStatus->setText("收到文本消息\n（双击条目查看全文）");
     m_recvList->scrollToBottom();
-    Logger::log(QString("[收] 文本消息 %1 字符，已显示在接收列表").arg(content.size()));
+    Logger::log(QString("[收] 文本消息 %1 字符（来自 %2），已显示在接收列表")
+                    .arg(content.size()).arg(senderAlias));
+}
+
+// ---- BUG4：文本消息查看弹窗（普通 QDialog，绕开 DMessageBox 标题乱码）----
+
+void MainWindow::showMessageDialog(const QString& senderAlias, const QString& content)
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle(senderAlias.isEmpty()
+                       ? QString("文本消息")
+                       : QString("文本消息 · 来自 %1").arg(senderAlias));
+    dlg.setWindowIcon(QIcon(":/localsend/logo-512.png"));
+    dlg.resize(560, 420);
+
+    QVBoxLayout* lay = new QVBoxLayout(&dlg);
+    lay->setContentsMargins(14, 12, 14, 10);
+    lay->setSpacing(8);
+
+    QLabel* hint = new QLabel(senderAlias.isEmpty()
+                              ? QString("文本内容（可选中复制）：")
+                              : QString("来自 %1 的文本消息（可选中复制）：").arg(senderAlias));
+    hint->setStyleSheet("color: #666; font-size: 12px;");
+    lay->addWidget(hint);
+
+    QTextEdit* edit = new QTextEdit(&dlg);
+    edit->setReadOnly(true);
+    edit->setPlainText(content);
+    edit->setLineWrapMode(QTextEdit::WidgetWidth);
+    // 关键：允许鼠标/键盘选中文字，方便手动复制
+    edit->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    lay->addWidget(edit, 1);
+
+    QDialogButtonBox* bb = new QDialogButtonBox(&dlg);
+    QPushButton* btnCopy = bb->addButton("复制全部", QDialogButtonBox::ActionRole);
+    QPushButton* btnClose = bb->addButton("关闭", QDialogButtonBox::RejectRole);
+    connect(btnCopy, &QPushButton::clicked, btnCopy, [btnCopy, content]() {
+        QApplication::clipboard()->setText(content);
+        btnCopy->setText("已复制 ✓");
+        QTimer::singleShot(1200, btnCopy, [btnCopy]() { btnCopy->setText("复制全部"); });
+    });
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::accept);
+    btnClose->setDefault(true);
+    lay->addWidget(bb);
+
+    dlg.exec();
 }
 
 // ---- 接收列表：打开 / 定位 ----
 
 void MainWindow::onRecvItemActivated(QListWidgetItem* item)
 {
-    // 文本消息：弹窗显示全文
+    // 文本消息：专用弹窗（标题正常、文字可选中、可一键复制）
     QString msg = item->data(Qt::UserRole + 1).toString();
     if (!msg.isEmpty()) {
-        DMessageBox::information(this, "文本消息", msg);
+        showMessageDialog(item->data(Qt::UserRole + 2).toString(), msg);
         return;
     }
     QString path = item->data(Qt::UserRole).toString();
@@ -1134,6 +1212,43 @@ void MainWindow::clearRecvList()
 // 接收确认对话框（核心安全功能）
 // ============================================================
 
+// ---- BUG2：文本消息接收确认框 —— 一句话 + 三按钮「同意 / 拒绝 / 一律拒绝」----
+// 返回：1=同意  0=拒绝  2=一律拒绝（Esc/关闭等同拒绝）
+
+int MainWindow::askReceiveTextMessage(const QString& peerAlias)
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle("收到文本消息");
+    dlg.setWindowIcon(QIcon(":/localsend/logo-512.png"));
+    dlg.setMinimumWidth(380);
+
+    QVBoxLayout* lay = new QVBoxLayout(&dlg);
+    lay->setContentsMargins(18, 16, 18, 12);
+    lay->setSpacing(12);
+
+    QLabel* tip = new QLabel(QString("%1希望给你发送文本消息，是否接收？").arg(peerAlias));
+    tip->setWordWrap(true);
+    tip->setStyleSheet("font-size: 14px;");
+    lay->addWidget(tip);
+    lay->addStretch();
+
+    QDialogButtonBox* bb = new QDialogButtonBox(&dlg);
+    QPushButton* btnAccept = bb->addButton("同意", QDialogButtonBox::AcceptRole);
+    QPushButton* btnReject = bb->addButton("拒绝", QDialogButtonBox::RejectRole);
+    QPushButton* btnBlock  = bb->addButton("一律拒绝", QDialogButtonBox::ActionRole);
+    btnReject->setDefault(true);   // 默认聚焦「拒绝」，防止误点同意
+    lay->addWidget(bb);
+
+    int choice = 0;
+    connect(btnAccept, &QPushButton::clicked, &dlg, [&]() { choice = 1; dlg.accept(); });
+    connect(btnBlock,  &QPushButton::clicked, &dlg, [&]() { choice = 2; dlg.accept(); });
+    connect(btnReject, &QPushButton::clicked, &dlg, [&]() { choice = 0; dlg.reject(); });
+    connect(&dlg, &QDialog::rejected, &dlg, [&]() { choice = 0; });
+
+    dlg.exec();
+    return choice;
+}
+
 void MainWindow::onReceiveRequest(const QString& pendingId,
                                   const QString& peerAlias,
                                   const QStringList& fileNames,
@@ -1172,6 +1287,39 @@ void MainWindow::onReceiveRequest(const QString& pendingId,
     bool isMessage = !filePreviews.isEmpty();
     for (auto it = filePreviews.begin(); it != filePreviews.end(); ++it)
         if (it.value().isEmpty()) { isMessage = false; break; }
+
+    // ---- BUG2：文本消息走精简确认框（同意 / 拒绝 / 一律拒绝）----
+    if (isMessage) {
+        QString bk = blockKey(peerFingerprint, peerAlias);
+        if (m_blockedTextSenders.contains(bk)) {
+            // 此前选过「一律拒绝」：重启前对同一发送方静默自动拒绝
+            m_server->rejectPrepare(pendingId);
+            m_recvStatus->setText(QString("已自动拒绝来自 %1 的文本消息（此前已选「一律拒绝」）")
+                                      .arg(peerAlias));
+            Logger::log(QString("[GUI] 文本消息被「一律拒绝」规则拦截，来自 %1 (%2)")
+                            .arg(peerAlias).arg(bk));
+            return;
+        }
+
+        int ret = askReceiveTextMessage(peerAlias);
+        if (ret == 1) {
+            m_server->acceptPrepare(pendingId);
+            m_recvStatus->setText(QString("已收到来自 %1 的文本消息").arg(peerAlias));
+            Logger::log("[GUI] 用户接受文本消息，来自 " + peerAlias);
+        } else if (ret == 2) {
+            m_blockedTextSenders.insert(bk);
+            m_server->rejectPrepare(pendingId);
+            m_recvStatus->setText(QString("已「一律拒绝」来自 %1 的文本消息（重启前对该发送方自动拒绝）")
+                                      .arg(peerAlias));
+            Logger::log(QString("[GUI] 用户「一律拒绝」文本消息，来自 %1 (%2)")
+                            .arg(peerAlias).arg(bk));
+        } else {
+            m_server->rejectPrepare(pendingId);
+            m_recvStatus->setText("已拒绝来自 " + peerAlias + " 的文本消息");
+            Logger::log("[GUI] 用户拒绝文本消息，来自 " + peerAlias);
+        }
+        return;
+    }
 
     QString detail = QString("发送方：%1\n发送方指纹：%2%3\n\n%4：\n%5%6")
                         .arg(peerAlias)

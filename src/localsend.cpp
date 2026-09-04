@@ -119,8 +119,8 @@ LocalSend::LocalSend(QObject* parent)
     m_nam = new QNetworkAccessManager(this);
     m_nam->setProxy(QNetworkProxy::NoProxy);   // 出站请求同样强制直连
 
-    m_fingerprint = QUuid::createUuid().toString(QUuid::WithoutBraces)
-                        .mid(0, 16);
+    // 指纹持久化：每次启动复用同一指纹，对端才不会把每次启动当成新设备
+    m_fingerprint = loadOrCreateFingerprint();
     m_alias = QHostInfo::localHostName();
     if (m_alias.isEmpty()) m_alias = "UOS-Device";
     m_saveDir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
@@ -244,6 +244,7 @@ void LocalSend::refreshDiscovery()
 {
     sendAnnouncement();
     for (const auto& d : m_devices) sendRegisterTo(d);
+    probeDevices();   // 主动探测：已下线设备立即移除，而不是等 30s 过期
 }
 
 void LocalSend::addPeerForTest(const QString& fp, const QString& ip, int port,
@@ -258,6 +259,78 @@ void LocalSend::addPeerForTest(const QString& fp, const QString& ip, int port,
     d.deviceType = "desktop";
     d.lastSeen = QDateTime::currentMSecsSinceEpoch();
     m_devices[fp] = d;
+}
+
+// 指纹持久化：官方 LocalSend 用固定指纹识别设备身份。若每次启动随机生成，
+// 对端会把每次启动当成一台新设备（旧条目要等 30s 才过期），出现多个同名客户端。
+// 指纹首次生成后落盘到 ~/.local/share/localsend-qt/fingerprint，后续启动复用。
+QString LocalSend::loadOrCreateFingerprint()
+{
+    QDir dir(QDir::homePath() + "/.local/share/localsend-qt");
+    if (!dir.exists()) QDir().mkpath(dir.absolutePath());
+    QFile f(dir.filePath("fingerprint"));
+    if (f.open(QIODevice::ReadOnly)) {
+        QString fp = QString::fromUtf8(f.readAll()).trimmed();
+        if (!fp.isEmpty()) return fp;
+        f.close();
+    }
+    QString fp = QUuid::createUuid().toString(QUuid::WithoutBraces).mid(0, 16);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        f.write(fp.toUtf8());
+    dbg(QString("[发现] 首次生成并持久化本机指纹: %1").arg(fp));
+    return fp;
+}
+
+// 主动探测：对每个已知设备发 GET /info，2s 无响应（换协议重试仍失败）即移除。
+// 用途：「刷新」按钮——已下线设备立即消失，而不是等 30s lastSeen 过期。
+void LocalSend::probeDevices()
+{
+    const QList<Device> devs = devices();
+    for (const Device& d : devs)
+        probeDevice(d, false);
+}
+
+void LocalSend::probeDevice(const Device& d, bool altProto)
+{
+    QString proto = altProto ? (d.protocol.compare("https", Qt::CaseInsensitive) == 0
+                                    ? QString("http") : QString("https"))
+                             : d.protocol;
+    if (proto.compare("https", Qt::CaseInsensitive) == 0 && !QSslSocket::supportsSsl())
+        proto = "http";
+
+    QUrl url(QString("%1://%2:%3%4/info").arg(proto).arg(d.ip).arg(d.port).arg(LS_API));
+    QNetworkRequest req(url);
+    if (proto.compare("https", Qt::CaseInsensitive) == 0)
+        req.setSslConfiguration(tlsConfig());
+
+    QNetworkReply* rep = m_nam->get(req);
+
+    // 2s 超时即中止（触发 finished）
+    QTimer* to = new QTimer(rep);
+    to->setSingleShot(true);
+    connect(to, &QTimer::timeout, rep, [rep]() {
+        if (!rep->isFinished()) rep->abort();
+    });
+    to->start(2000);
+
+    connect(rep, &QNetworkReply::sslErrors, rep, [rep](const QList<QSslError>&) {
+        rep->ignoreSslErrors();   // 自签名证书
+    });
+
+    QString fp = d.fingerprint;
+    connect(rep, &QNetworkReply::finished, this, [this, rep, d, fp, altProto]() {
+        rep->deleteLater();
+        if (!m_devices.contains(fp)) return;   // 已被移除或过期
+        bool alive = (rep->error() == QNetworkReply::NoError)
+                     && rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200;
+        if (alive) return;
+        // 首次失败：对端可能声明的协议与实际不符，换另一种协议再试一次
+        if (!altProto) { probeDevice(d, true); return; }
+        dbg(QString("[发现] 探测无响应，移除离线设备: %1 (%2)")
+                        .arg(m_devices.value(fp).alias).arg(fp.left(8)));
+        m_devices.remove(fp);
+        emit devicesChanged();
+    });
 }
 
 void LocalSend::onUdpReadyRead()
@@ -455,12 +528,16 @@ void LocalSend::finishUpload(const QString& sessionId, const QString& fileId,
     RecvSession& s = m_recvSessions[sessionId];
     s.savedPaths[fileId] = savedPath;
     dbg(QString("[收] 落盘完成 %1 -> %2").arg(s.fileNames.value(fileId)).arg(savedPath));
-    emit receiveFinished(sessionId, s.fileNames.value(fileId), savedPath);
 
     // 官方协议：preview 非空 = 文本消息
+    // 消息只投递 messageReceived（携带发送方名字），不发 receiveFinished，
+    // 避免 GUI 接收列表多出一条 [完成] UUID.txt 的文件条目
     QString preview = s.previews.value(fileId);
-    if (!preview.isEmpty())
-        emit messageReceived(sessionId, s.fileNames.value(fileId), preview);
+    if (!preview.isEmpty()) {
+        emit messageReceived(sessionId, s.peerAlias, preview);
+        return;
+    }
+    emit receiveFinished(sessionId, s.fileNames.value(fileId), savedPath);
 }
 
 void LocalSend::cancelSession(const QString& sessionId)
@@ -468,12 +545,24 @@ void LocalSend::cancelSession(const QString& sessionId)
     m_recvSessions.remove(sessionId);
 }
 
+// 该上传是否为文本消息（preview 非空）：消息只投递 messageReceived，
+// 不发进度/完成信号，避免 GUI 接收列表出现 UUID.txt 的进度与文件条目
+bool LocalSend::isMessageUpload(const QString& sessionId, const QString& fileName) const
+{
+    if (!m_recvSessions.contains(sessionId)) return false;
+    const RecvSession& s = m_recvSessions.value(sessionId);
+    for (auto it = s.fileNames.begin(); it != s.fileNames.end(); ++it)
+        if (it.value() == fileName)
+            return !s.previews.value(it.key()).isEmpty();
+    return false;
+}
+
 // 文本消息投递：消息传输不建会话、不落盘，内容来自 prepare-upload 的 preview 字段
 void LocalSend::deliverMessage(const QString& peerAlias, const QString& fileName,
                                const QString& content)
 {
     dbg(QString("[收] 文本消息 来自=%1  %2 字符").arg(peerAlias).arg(content.size()));
-    emit messageReceived(QString(), fileName, content);
+    emit messageReceived(QString(), peerAlias, content);
 }
 
 // ---------------- 发送（客户端侧） ----------------
